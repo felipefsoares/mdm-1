@@ -43,7 +43,7 @@ mkdir -p "$DASK_OUTPUT_DIR"
 
 # Limpar saídas anteriores
 echo -e "${YELLOW}🧹 Limpando saídas anteriores...${NC}"
-rm -f "$DASK_OUTPUT_DIR/dados_quiquadrado_*.csv"
+rm -f "$DASK_OUTPUT_DIR"/*_quiquadrado_*.csv
 rm -f "$CONSOLIDATED_OUTPUT"
 
 echo ""
@@ -76,58 +76,18 @@ echo -e "${GREEN}📦 Consolidando arquivos...${NC}"
 echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 
 # Verificar se há arquivos para consolidar
-if ! ls "$DASK_OUTPUT_DIR"/dados_quiquadrado_*.csv 1> /dev/null 2>&1; then
+if ! ls "$DASK_OUTPUT_DIR"/*_quiquadrado_*.csv 1> /dev/null 2>&1; then
     echo -e "${RED}❌ Nenhum arquivo processado encontrado para consolidar${NC}"
     exit 1
 fi
 
-# Consolidar todos os arquivos em um
-echo "Lendo e consolidando arquivos..."
-python << 'EOF'
-import pandas as pd
-import os
-import glob
-
-dask_output_dir = "./processados/dask"
-consolidated_output = "./processados/dados_consolidados.csv"
-
-# Encontrar todos os arquivos
-arquivos = sorted(glob.glob(os.path.join(dask_output_dir, "dados_quiquadrado_*.csv")))
-
-if not arquivos:
-    print("❌ Nenhum arquivo encontrado")
-    exit(1)
-
-print(f"\n📂 Encontrados {len(arquivos)} arquivos:")
-for arquivo in arquivos:
-    print(f"   - {os.path.basename(arquivo)}")
-
-# Ler e consolidar
-print("\n📥 Consolidando...")
-dfs = []
-total_linhas = 0
-
-for arquivo in arquivos:
-    try:
-        df = pd.read_csv(arquivo)
-        dfs.append(df)
-        total_linhas += len(df)
-        print(f"   ✓ {os.path.basename(arquivo)}: {len(df)} linhas")
-    except Exception as e:
-        print(f"   ✗ Erro ao ler {arquivo}: {e}")
-
-# Concatenar
-df_consolidado = pd.concat(dfs, ignore_index=True)
-
-# Salvar
-df_consolidado.to_csv(consolidated_output, index=False)
-
-print(f"\n✅ Consolidação concluída!")
-print(f"   📊 Total de linhas: {len(df_consolidado)}")
-print(f"   📊 Total de colunas: {len(df_consolidado.columns)}")
-print(f"   💾 Arquivo: {consolidated_output}")
-
-EOF
+# Executar script de consolidação
+if python consolidate_dados.py -i "$DASK_OUTPUT_DIR" -o "$CONSOLIDATED_OUTPUT"; then
+    echo -e "${GREEN}✅ Consolidação realizada com sucesso${NC}"
+else
+    echo -e "${RED}❌ Erro na consolidação de arquivos${NC}"
+    exit 1
+fi
 
 FIM=$(date '+%d/%m/%Y %H:%M:%S')
 

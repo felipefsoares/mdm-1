@@ -1,7 +1,8 @@
 import time
 import dask
-import dask.dataframe as dd
-from dask.distributed import Client, LocalCluster
+import dask_cudf as dd
+from dask.distributed import Client
+from dask_cuda import LocalCUDACluster
 import pandas as pd
 import numpy as np
 from scipy.stats import chi2
@@ -25,11 +26,10 @@ def main():
     # PASSO 1: CONFIGURAÇÃO DO DASK PARA BIG DATA COM TODOS OS 12 CORES
     # ==============================================================================
 
-    # Criar LocalCluster com 4 workers, cada um com 6GB de memória
-    cluster = LocalCluster(
-        n_workers=2,
-        threads_per_worker=2,
-        memory_limit='12GB',
+    # Substituindo LocalCluster padrão por cluster de GPU
+    cluster = LocalCUDACluster(
+        # Removemos o rmm_pool_size fixo para evitar crash imediato se a GPU tiver menos memória,
+        # permitindo o espalhamento (spilling) para a memória RAM nativa do PC sob demanda.
         silence_logs=True
     )
     client = Client(cluster)
@@ -40,17 +40,32 @@ def main():
     })
 
     # 1. Carregando o dataset com blocksize otimizado para usar toda a memória
-    path_pattern = './processados/dask/*_quiquadrado_*.csv'
+    # LER APENAS O ANO ESPECÍFICO (ex: 2019) para evitar Mismatch/KeyError 
+    # de colunas geradas pelo One-Hot Encoding que não existem em outros anos
+    path_pattern = './processados/dask/microdados_matriculas_2019_quiquadrado_*.csv'
 
     # Bloco adequado (padrão do Dask) ~64MB
-    df = dd.read_csv(path_pattern, blocksize='128MB')
+    # REMOVIDO o `blocksize` porque no dask_cudf (GPU) tentar fracionar arquivos de 160MB cortando à força os 
+    # bytes das linhas trava o CUDA detectando a "compressão do buffer". Como o dataset inteiro
+    # já tem "só" ~160MB por CSV, carregar direto pra partição resolve o congelamento.
+    df = dd.read_csv(path_pattern, sep=',')
     
-    # Cachear em memória para operações subsequentes
-    df = df.persist()
+    # REMOVIDO: df.persist() 
+    # GPUs têm VRAM muito limitada (geralmente 8 a 16GB). Persistir todo o dataset na GPU
+    # causa Out of Memory (OOM) imediato e mata o Worker (que gera o ConnectionPool closed).
 
     k = 30 # Número de features que queremos selecionar
     coluna_alvo = 'Alvo_Evadido'
-    features = [c for c in df.columns if c != coluna_alvo]
+    
+    # Aplicar coerção para float32 de forma global e direta sem uso de dicionários.
+    # O dask_cudf sofre de um bug no framework onde astype({}) com dicionários
+    # lança "KeyError: Only a column name..." de forma errônea dependendo do Meta do Index.
+    # Como TUDO é numérico, mandamos um cast unificado para tudo e sobrepomos o Alvo.
+    df = df.astype('float32')
+    df[coluna_alvo] = df[coluna_alvo].astype('int32')
+    
+    # O array de features numéricas garantidas processadas
+    features = [str(c) for c in df.columns if str(c) != coluna_alvo]
 
     # Diagnostics: mostrar que Dask está realmente particionado
     print(f"\n📊 CONFIGURAÇÃO DASK:")
@@ -72,8 +87,12 @@ def main():
     O_lazy = df.groupby(coluna_alvo)[features].sum()
     class_counts_lazy = df[coluna_alvo].value_counts()
     
-    # Avaliar as duas simultaneamente varrendo os arquivos CSV UMA ÚNICA VEZ
+    # Avaliar as duas simultaneamente na GPU
     O, class_counts = dask.compute(O_lazy, class_counts_lazy)
+    
+    # Trazer de volta para a CPU/Pandas para as operações matemáticas com Scipy e Numpy
+    O = O.to_pandas()
+    class_counts = class_counts.to_pandas()
     
     last_time = print_elapsed('cálculos (O e class_counts) concluídos em um passe único do Dask', start_time, last_time)
 
@@ -155,8 +174,8 @@ def main():
     print("="*60)
     
     # Fechar o cluster Dask
-    # client.close()
-    # cluster.close()
+    client.close()
+    cluster.close()
 
     # def cramers_v(x, y):
     #     """

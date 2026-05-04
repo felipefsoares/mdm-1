@@ -85,6 +85,7 @@ def aplicar_label_encoding_partition(partition, colunas_label_encoding, encoders
             partition[col] = partition[col].astype(str).map(
                 lambda x: le.transform([x])[0] if x in le.classes_ else -1
             )
+    gc.collect()
     return partition
 
 def main(arquivo_csv):
@@ -192,6 +193,7 @@ def main(arquivo_csv):
             if 'Categoria da Situacao' in partition.columns:
                 partition['Categoria da Situacao'] = partition['Categoria da Situacao'].astype(str).str.strip()
                 partition['Alvo_Evadido'] = (partition['Categoria da Situacao'] == 'Evadidos').astype(int)
+            gc.collect()
             return partition
 
         # Criar meta com coluna Alvo_Evadido
@@ -246,6 +248,7 @@ def main(arquivo_csv):
             }
             if 'Renda Familiar' in partition.columns:
                 partition['Renda Familiar'] = partition['Renda Familiar'].map(mapping_renda).fillna(-1).astype('int64')
+            gc.collect()
             return partition
 
         if 'Renda Familiar' in df.columns:
@@ -256,12 +259,7 @@ def main(arquivo_csv):
 
         # 6. Categóricos Nominais (Label Encoding) - Pré-treinar encoders
         colunas_label_encoding = [
-            'Instituicao',
-            'Cor / Raca',
-            'Turno',
-            'Sexo', 'Subeixo Tecnologico', 'Tipo de Curso', 'Tipo de Oferta',
-            'Eixo Tecnologico', 'Modalidade de Ensino', 
-            'Matricula Atendida', 'Fonte de Financiamento', 'Municipio', 'Faixa Etaria',
+            'Fonte de Financiamento',
         ]
 
         # Pré-treinar os LabelEncoders em toda a distribuição
@@ -293,6 +291,13 @@ def main(arquivo_csv):
         # 7. One-Hot Encoding para colunas nominais
         colunas_onehotencoding = [
             'Nome de Curso',     
+            'Instituicao',
+            'Cor / Raca',
+            'Turno',
+            'Sexo', 'Subeixo Tecnologico', 'Tipo de Curso', 'Tipo de Oferta',
+            'Eixo Tecnologico', 'Modalidade de Ensino', 
+            'Matricula Atendida', 'Municipio', 'Faixa Etaria',
+
         ]
         
         # Validar que as colunas existem
@@ -310,7 +315,9 @@ def main(arquivo_csv):
         print(f"Quantidade de colunas do DataFrame após transformações: {df.shape[1]}. Gravando dados em chunks agora...")
 
         # Salvar resultado em partições
-        path_output = './processados/dask/dados_quiquadrado_*.csv'
+        # Extrair identificador do arquivo para evitar sobrescrita entre diferentes anos
+        basename = os.path.splitext(os.path.basename(arquivo_csv))[0]  # ex: 'microdados_matriculas_2023'
+        path_output = f'./processados/dask/{basename}_quiquadrado_*.csv'
         df.to_csv(path_output, index=False)
         print_elapsed(f"Arquivo salvo com sucesso: {path_output}")
 
