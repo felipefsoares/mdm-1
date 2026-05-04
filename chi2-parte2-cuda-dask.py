@@ -121,9 +121,22 @@ def main():
         columns=features
     )
 
-    # Aplicando a fórmula do Qui-Quadrado: soma de (O - E)² / E
-    chi2_stat = ((O - E) ** 2 / E).sum(axis=0)
-    last_time = print_elapsed('calculando estatística do Qui-Quadrado', start_time, last_time)
+    # Aplicando a fórmula do Qui-Quadrado COMPLETA (incluindo o caso onde a feature é 0)
+    # Isso é necessário para o cálculo correto do V de Cramer em tabelas 2xN
+    O_neg = class_counts.values[:, np.newaxis] - O
+    E_neg = class_counts.values[:, np.newaxis] - E
+    
+    # Evitar divisão por zero (ocorre se uma feature é constante)
+    epsilon = 1e-12
+    chi2_pos = ((O - E) ** 2 / (E + epsilon)).sum(axis=0)
+    chi2_neg = ((O_neg - E_neg) ** 2 / (E_neg + epsilon)).sum(axis=0)
+    chi2_stat = chi2_pos + chi2_neg
+    
+    # Cálculo do V de Cramer: sqrt(chi2 / (n * min(k-1, r-1)))
+    # Como as features são tratadas como binárias aqui (1 ou 0), k=2, então min(1, r-1) = 1
+    cramers_v = np.sqrt(chi2_stat / n_amostras)
+    
+    last_time = print_elapsed('calculando estatísticas do Qui-Quadrado e V de Cramer', start_time, last_time)
 
     # =========================================================
     # FASE 3: SELEÇÃO E APLICAÇÃO
@@ -156,15 +169,33 @@ def main():
     print("\n" + "="*60)
     print("📊 RESULTADOS DO TESTE QUI-QUADRADO POR FEATURE")
     print("="*60)
-    
-    # Imprimir score e p-value para cada feature (ordenado por score)
+    # Preparar resultados para exibição e exportação
+    results_list = []
     chi2_sorted = chi2_stat.sort_values(ascending=False)
-    for feature, score in chi2_sorted.items():
+    
+    # Imprimir score, p-value e V de Cramer para cada feature (ordenado por score)
+    for feature in chi2_sorted.index:
+        score = float(chi2_stat[feature])
+        v_score = float(cramers_v[feature])
         # P-value individual: graus de liberdade = (n_classes - 1)
         df_individual = n_classes - 1
-        p_value_individual = chi2.sf(score, df_individual)
-        print(f"{feature:40s} | χ²: {score:12.4f} | p-value: {p_value_individual:.2e}")
-    
+        p_value_individual = float(chi2.sf(score, df_individual))
+        
+        print(f"{feature:40s} | χ²: {score:12.4f} | V: {v_score:.4f} | p-value: {p_value_individual:.2e}")
+        
+        # Adicionar à lista para o CSV
+        results_list.append({
+            'feature': feature,
+            'chi2_score': score,
+            'cramers_v': v_score,
+            'p_value': p_value_individual
+        })
+
+    # Gravar resultados em CSV
+    df_results = pd.DataFrame(results_list)
+    output_csv = 'resultados_qui_quadrado.csv'
+    df_results.to_csv(output_csv, index=False)
+    print(f"\n✅ Resultados exportados para: {output_csv}")
     print("\n" + "="*60)
     print("📊 RESULTADOS AGREGADOS")
     print("="*60)
@@ -176,39 +207,6 @@ def main():
     # Fechar o cluster Dask
     client.close()
     cluster.close()
-
-    # def cramers_v(x, y):
-    #     """
-    #     Calcula o V de Cramer entre duas variáveis categóricas.
-    #     """
-    #     contingency_table = pd.crosstab(x, y)
-    #     chi2, p_value, dof, expected = chi2_contingency(contingency_table)
-    #     n = contingency_table.sum().sum()
-    #     phi2 = chi2 / n
-    #     r, k = contingency_table.shape
-    #     # Ajuste para evitar divisão por zero se r ou k forem 1
-    #     phi2corr = max(0, phi2 - ((k-1)*(r-1))/(n-1))
-    #     rcorr = r - ((r-1)**2)/(n-1)
-    #     kcorr = k - ((k-1)**2)/(n-1)
-    #     return np.sqrt(phi2corr / min((kcorr-1), (rcorr-1))) if min((kcorr-1), (rcorr-1)) != 0 else np.nan
-
-    # print("Calculando o V de Cramer para as features selecionadas...")
-
-    # cramer_v_results = []
-    # # Iterar apenas sobre as features que foram realmente selecionadas e são válidas (não NaN)
-    # # Excluindo 'Numero de registros' e 'Matricula Atendida' que resultaram em NaN no chi2
-    # valid_selected_features = [f for f in chi2_sorted if f not in ['Numero de registros', 'Matricula Atendida']]
-
-    # for feature in valid_selected_features:
-    #     # Certifique-se de que as colunas são tratadas como categóricas para pd.crosstab
-    #     v_value = cramers_v(df[feature].astype('category'), df['Alvo_Evadido'].astype('category'))
-    #     cramer_v_results.append({'Feature': feature, 'Cramers_V': v_value})
-
-    # cramer_v_df = pd.DataFrame(cramer_v_results)
-    # cramer_v_df = cramer_v_df.sort_values(by='Cramers_V', ascending=False)
-
-    # print("\nResultados do V de Cramer (Maiores valores indicam maior associação):\n")
-    # print(cramer_v_df)
 
 if __name__ == '__main__':
     main()
