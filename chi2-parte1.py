@@ -121,6 +121,8 @@ for col in colunas_datas:
 # 5. Categóricos Ordinais: Renda Familiar
 # Precisamos definir uma ordem lógica para a regressão entender a hierarquia
 mapping_renda = {
+
+    
    'Nao declarada': 0,
    '0<RFP<=0,5': 1,
    '0,5<RFP<=1,0': 2,
@@ -136,11 +138,10 @@ df['Renda Familiar'] = df['Renda Familiar'].map(mapping_renda).fillna(-1)
 # Usamos sparse_output=True para lidar com grande número de colunas e economizar memória.
 
 
-colunas_onehotencoding = [
-    'Nome de Curso',     
-]
+colunas_onehotencoding = []     
 
 colunas_label_encoding = [
+    'Nome de Curso',
     'Instituicao',
     'Cor / Raca',
      'Turno',
@@ -181,10 +182,10 @@ for col in colunas_label_encoding:
 # Concatena o DataFrame principal com as novas colunas codificadas esparsas
 #df = pd.concat([df, encoded_df], axis=1)
 
-df = pd.get_dummies(df, columns=colunas_onehotencoding, drop_first=True, dtype=int)
+#df = pd.get_dummies(df, columns=colunas_onehotencoding, drop_first=True, dtype=int)
 print(f"Quantidade de colunas do DataFrame: {df.shape[1]}")
 
-path_output = './processados/dados_quiquadrado_reduzido.csv'
+path_output = './processados_sem_OHE/dados_quiquadrado_reduzido.csv'
 df.to_csv(path_output, index=False)
 
 print(f"Sucesso! {len(df)} linhas processadas.")
