@@ -113,6 +113,8 @@ def main(arquivo_csv):
         path_input = arquivo_csv
         
         # Step 1: Ler amostra para inspeção de metadados
+        # Motivo: O Dask lê o arquivo em vários blocos (chunks) espalhados pela memória. Se o bloco 1 tiver apenas números inteiros em uma coluna, o Dask acha que a coluna é int64. Mas se o bloco 2 tiver um valor decimal ou vazio nessa mesma coluna, o Dask quebra com erro de tipo (TypeError).
+        # Solução: Lemos 1000 linhas usando o Pandas normal para "espiar" os dados, ver o que é texto, o que é número, e montar o dicionário dtype_dict. Isso garante que o Dask saiba o tipo exato de cada coluna desde o começo.
         print("Lendo amostra do CSV para inspeção...")
         df_sample = pd.read_csv(
             path_input, 
@@ -139,7 +141,11 @@ def main(arquivo_csv):
                 dtype_dict[col] = 'float64'
             elif col in ['Ano']:
                 dtype_dict[col] = 'int64'
+
+
         
+        del df_sample
+        gc.collect()
         print(f"Tipos de dados detectados: {len(dtype_dict)} colunas com dtype específico")
         
         # Step 5: Ler CSV com Dask usando colnames_map para renomear
@@ -152,6 +158,7 @@ def main(arquivo_csv):
         )
         
         # Criar mapa: nome_original -> nome_normalizado
+        # Motivo: O script precisa remover acentos e espaços dos nomes das colunas. O Dask tem dificuldade em renomear colunas "on-the-fly" se você não disser de onde para onde o nome está mudando. Lemos nrows=0 (0 milissegundos) apenas para pegar os nomes originais e montar o dicionário colnames_map (ex: {"Renda Básica": "Renda Basica"}).
         colnames_map = {
             original: remover_acentos(original).strip() 
             for original in df_original_header.columns
@@ -173,6 +180,8 @@ def main(arquivo_csv):
         print_elapsed("Nomes de colunas normalizados")
         
         # Step 7: Criar meta correto com a amostra normalizada
+        # O meta é uma amostra vazia do DataFrame que serve para dizer ao Dask como deve ser a estrutura do DataFrame
+        # (quais colunas, qual ordem e qual tipo de dado)
         meta = df_sample.head(0).copy()
         
         print(f"Meta criado com {len(meta.columns)} colunas")
@@ -191,8 +200,8 @@ def main(arquivo_csv):
         def filtrar_e_criar_target(partition):
             """Filtra e cria coluna Alvo_Evadido em cada partição"""
             if 'Categoria da Situacao' in partition.columns:
-                partition['Categoria da Situacao'] = partition['Categoria da Situacao'].astype(str).str.strip()
-                partition['Alvo_Evadido'] = (partition['Categoria da Situacao'] == 'Evadidos').astype(int)
+                #partition['Categoria da Situacao'] = partition['Categoria da Situacao'].astype(str).str.strip()
+                partition['Alvo_Evadido'] = (partition['Categoria da Situacao'] == 'Evadidos').astype(int) # é aqui que tem que modificar para adicionar uma terceira classe ou remover os em curso
             gc.collect()
             return partition
 
@@ -201,7 +210,14 @@ def main(arquivo_csv):
         if 'Alvo_Evadido' not in meta_with_target.columns:
             meta_with_target['Alvo_Evadido'] = 0
         
-        
+        # O map_partitions pega uma função normal que você criou (escrita para funcionar no Pandas) e a aplica individualmente  a cada um desses pequenos pedaços (partições) de forma paralela (como um map).
+        #Imagine que você tem um livro de 12 mil páginas (seu arquivo gigante) e 12 trabalhadores (os 12 núcleos do seu processador).
+        # O map_partitions distribui 1.000 páginas para cada trabalhador. Cada trabalhador lê seu "mini-livro" ao mesmo tempo que os outros (paralelismo) e aplica a função de limpeza.
+        # No final, o Dask junta todas as páginas limpas de volta na ordem correta.
+
+        #O parâmetro meta é como um "contrato" ou uma "planta baixa" que você entrega para o Dask antes dele começar a trabalhar.
+        #Aviso prévio: O meta é um DataFrame vazio (sem linhas, só com o cabeçalho) que diz ao Dask exatamente como o resultado daquela função vai ficar.
+        #Evita erros: No seu código, a função filtrar_e_criar_target cria uma coluna nova chamada Alvo_Evadido. Se você não passasse o meta=meta_with_target (que já tem essa coluna avisada nele), o Dask iria quebrar lá na frente dizendo: "Ei, você está tentando usar uma coluna 'Alvo_Evadido' que não existia no arquivo original e ninguém me avisou que ela ia ser criada!"
         df = df.map_partitions(filtrar_e_criar_target, meta=meta_with_target)
         print_elapsed("Filtragem e criação de Alvo_Evadido concluída")
 
@@ -306,9 +322,12 @@ def main(arquivo_csv):
 
         if colunas_onehotencoding:
             # Converter para categorical dtype antes de get_dummies (requerido pelo Dask)
+            # O que essa linha faz é forçar o Dask a dar uma "espiada" rápida em todas as partições do arquivo inteiro só para levantar o inventário de quais são todas as palavras possíveis (categorias) que existem naquelas colunas específicas.
+            #  o Dask processa os dados aos pedaços. Imagine que o Dask está lendo a Partição 1 e lá dentro só existem alunos do turno "Matutino". Se o Dask usasse o get_dummies ali na hora, ele criaria apenas 1 coluna (Turno_Matutino). Aí ele vai ler a Partição 2, onde calhou de ter "Vespertino" e "Noturno". Ele criaria 2 colunas diferentes. No final, quando ele tentasse juntar os pedaços, ocorreria um erro fatal porque a Partição 1 teria um número de colunas diferente da Partição 2.
             df = df.categorize(columns=colunas_onehotencoding)
             print_elapsed(f"Colunas {colunas_onehotencoding} convertidas para categorical")
             
+            # quando essa linha roda (dd.get_dummies), o Dask já sabe a lista completa de categorias. Se a Partição 1 só tiver alunos do turno "Matutino", o Dask será esperto o suficiente para criar a coluna Turno_Vespertino e Turno_Noturno e encher tudo com 0, garantindo que todas as partições tenham sempre exatamente as mesmas colunas antes de serem salvas no disco.
             df = dd.get_dummies(df, columns=colunas_onehotencoding, drop_first=True, dtype=int)
             print_elapsed("One-Hot Encoding aplicado")
         

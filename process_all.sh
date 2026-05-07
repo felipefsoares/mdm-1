@@ -71,25 +71,29 @@ for arquivo in "$DATASET_DIR"/*.csv; do
     fi
 done
 
-echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${GREEN}📦 Consolidando arquivos...${NC}"
-echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 
-# Verificar se há arquivos para consolidar
-if ! ls "$DASK_OUTPUT_DIR"/*_quiquadrado_*.csv 1> /dev/null 2>&1; then
-    echo -e "${RED}❌ Nenhum arquivo processado encontrado para consolidar${NC}"
-    exit 1
-fi
+#essa etapa não funciona ppois gera estouro de memoria
+# echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+# echo -e "${GREEN}📦 Consolidando arquivos...${NC}"
+# echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 
-# Executar script de consolidação
-if python consolidate_dados.py -i "$DASK_OUTPUT_DIR" -o "$CONSOLIDATED_OUTPUT"; then
-    echo -e "${GREEN}✅ Consolidação realizada com sucesso${NC}"
-else
-    echo -e "${RED}❌ Erro na consolidação de arquivos${NC}"
-    exit 1
-fi
+# # Verificar se há arquivos para consolidar
+# if ! ls "$DASK_OUTPUT_DIR"/*_quiquadrado_*.csv 1> /dev/null 2>&1; then
+#     echo -e "${RED}❌ Nenhum arquivo processado encontrado para consolidar${NC}"
+#     exit 1
+# fi
 
-FIM=$(date '+%d/%m/%Y %H:%M:%S')
+# # Executar script de consolidação
+# if python consolidate_dados.py -i "$DASK_OUTPUT_DIR" -o "$CONSOLIDATED_OUTPUT"; then
+#     echo -e "${GREEN}✅ Consolidação realizada com sucesso${NC}"
+# else
+#     echo -e "${RED}❌ Erro na consolidação de arquivos${NC}"
+#     exit 1
+# fi
+
+# FIM=$(date '+%d/%m/%Y %H:%M:%S')
+
+
 
 echo ""
 echo -e "${GREEN}╔══════════════════════════════════════════════════════════════════════════╗"

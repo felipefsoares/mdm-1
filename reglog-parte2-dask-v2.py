@@ -7,6 +7,9 @@ import numpy as np
 from scipy.stats import chi2
 from scipy.stats import chi2_contingency
 import glob
+from dask_ml.linear_model import LogisticRegression
+import shap
+import matplotlib.pyplot as plt
 
 
 def print_elapsed(label="", start_time=None, last_time=None):
@@ -122,129 +125,55 @@ def main():
 
     last_time = print_elapsed('iniciando cálculos lazy', start_time, last_time)
     
-    # Criar promessas de cálculo (lazily evaluated)
-    O_lazy = df.groupby(coluna_alvo)[features].sum()
-    class_counts_lazy = df[coluna_alvo].value_counts()
-    
-    # Avaliar as duas simultaneamente
-    O, class_counts = dask.compute(O_lazy, class_counts_lazy)
-    
-    # Garantir mesma ordem de classes antes da extração com .values
-    O = O.sort_index()
-    class_counts = class_counts.sort_index()
-    
-    # Já estão em formato Pandas/Series após o compute no Dask padrão
-    
-    last_time = print_elapsed('cálculos (O e class_counts) concluídos em um passe único do Dask', start_time, last_time)
+    # O Dask-ML prefere Dask Arrays com comprimentos conhecidos
+    X = df[features].to_dask_array(lengths=True)
+    y = df[coluna_alvo].to_dask_array(lengths=True)
 
+    print("🚀 Treinando modelo de Regressão Logística...")
+    lr = LogisticRegression(max_iter=100)
+    lr.fit(X, y)
+    
     # =========================================================
-    # FASE 2: CÁLCULO MATEMÁTICO RÁPIDO NA MEMÓRIA (PANDAS/NUMPY)
+    # FASE 2: INTERPRETABILIDADE COM SHAP
     # =========================================================
-
-    # Total de amostras
-    n_amostras = class_counts.sum()
-
-    # Probabilidade de cada classe ocorrer
-    class_probs = class_counts / n_amostras
-
-    # Soma global de cada feature (podemos obter somando a matriz O na vertical)
-    feature_sums = O.sum(axis=0)
     
-    # Garantir que tudo é numérico (converter para float)
-    class_probs = class_probs.astype(float).values
-    feature_sums = feature_sums.astype(float).values
+    # 4. Aplicar o SHAP
+    # O SHAP exige dados reais (em memória). Pegamos uma amostra significante.
+    print("🧪 Coletando amostra para o SHAP...")
+    X_sample = df[features].sample(frac=0.1).compute() # Pega 10% ou limite por n se for muito grande
+    if len(X_sample) > 5000:
+        X_sample = X_sample.sample(5000)
 
-    # E: Valores Esperados (Probabilidade da classe * Soma total da feature)
-    # Usamos np.outer para cruzar rapidamente a probabilidade com a soma
-    E = pd.DataFrame(
-        np.outer(class_probs, feature_sums),
-        index=O.index,
-        columns=features
-    )
+    # Para modelos lineares, o LinearExplainer é extremamente rápido
+    explainer = shap.LinearExplainer(lr, X_sample)
+    shap_values = explainer.shap_values(X_sample)
 
-    # Aplicando a fórmula do Qui-Quadrado COMPLETA (incluindo o caso onde a feature é 0)
-    # Isso é necessário para o cálculo correto do V de Cramer em tabelas 2xN
-    O_neg = class_counts.values[:, np.newaxis] - O
-    E_neg = class_counts.values[:, np.newaxis] - E
+    # 5. Visualização e Extração das Importâncias
+    print("🖼️  Gerando gráfico de importância (shap_summary.png)...")
+    plt.figure(figsize=(12, 8))
+    shap.summary_plot(shap_values, X_sample, plot_type="bar", show=False)
+
     
-    # Evitar divisão por zero (ocorre se uma feature é constante)
-    epsilon = 1e-12
-    chi2_pos = ((O - E) ** 2 / (E + epsilon)).sum(axis=0)
-    chi2_neg = ((O_neg - E_neg) ** 2 / (E_neg + epsilon)).sum(axis=0)
-    chi2_stat = chi2_pos + chi2_neg
+    plt.tight_layout()
+    plt.savefig('shap_summary.png')
+    plt.close()
+
+    # 6. Criar um ranking das colunas mais importantes
+    feature_importance = pd.DataFrame({
+        'feature': features,
+        'importance': np.abs(shap_values).mean(axis=0)
+    }).sort_values(by='importance', ascending=False)
+
+    print("\nRanking das Colunas Mais Importantes:")
+    print(feature_importance)
+
     
-    # Cálculo do V de Cramer: sqrt(chi2 / (n * min(k-1, r-1)))
-    # Como as features são tratadas como binárias aqui (1 ou 0), k=2, então min(1, r-1) = 1
-    cramers_v = np.sqrt(chi2_stat / n_amostras)
-    
-    last_time = print_elapsed('calculando estatísticas do Qui-Quadrado e V de Cramer', start_time, last_time)
-
-    # =========================================================
-    # FASE 3: SELEÇÃO E APLICAÇÃO
-    # =========================================================
-
-    # Pegando os nomes das K melhores features (maiores valores de Qui-Quadrado)
-    melhores_features = chi2_stat.nlargest(k).index.tolist()
-
-    last_time = print_elapsed(f"As {k} melhores features pelo Qui-Quadrado são:", start_time, last_time)
-    print(melhores_features)
-
-    # Criando o dataframe final preguiçoso apenas com as colunas selecionadas
-    df_selecionado = df[melhores_features + [coluna_alvo]]
-
-    # =========================================================
-    # FASE 4: EXIBINDO RESULTADOS
-    # =========================================================
-
-    # Score do Qui-Quadrado (estatística total)
-    chi2_score = chi2_stat.sum()
-
-    # Graus de liberdade: (número de features - 1) * (número de classes - 1)
-    n_features = len(features)
-    n_classes = len(class_counts)
-    df_chi2 = (n_features - 1) * (n_classes - 1)
-
-    # P-value: probabilidade de observar uma estatística tão extrema ou mais
-    p_value = chi2.sf(chi2_score, df_chi2)
-
-    print("\n" + "="*60)
-    print("📊 RESULTADOS DO TESTE QUI-QUADRADO POR FEATURE")
-    print("="*60)
-    # Preparar resultados para exibição e exportação
-    results_list = []
-    chi2_sorted = chi2_stat.sort_values(ascending=False)
-    
-    # Imprimir score, p-value e V de Cramer para cada feature (ordenado por score)
-    for feature in chi2_sorted.index:
-        score = float(chi2_stat[feature])
-        v_score = float(cramers_v[feature])
-        # P-value individual: graus de liberdade = (n_classes - 1)
-        df_individual = n_classes - 1
-        p_value_individual = float(chi2.sf(score, df_individual))
-        
-        print(f"{feature:40s} | χ²: {score:12.4f} | V: {v_score:.4f} | p-value: {p_value_individual:.2e}")
-        
-        # Adicionar à lista para o CSV
-        results_list.append({
-            'feature': feature,
-            'chi2_score': score,
-            'cramers_v': v_score,
-            'p_value': p_value_individual
-        })
 
     # Gravar resultados em CSV
-    df_results = pd.DataFrame(results_list)
-    output_csv = 'resultados_qui_quadrado.csv'
-    df_results.to_csv(output_csv, index=False)
+    output_csv = 'resultados_regressao_logistica.csv'
+    feature_importance.to_csv(output_csv, index=False)
     print(f"\n✅ Resultados exportados para: {output_csv}")
-    print("\n" + "="*60)
-    print("📊 RESULTADOS AGREGADOS")
-    print("="*60)
-    print(f"Score Total (χ²): {chi2_score:.4f}")
-    print(f"P-value Total: {p_value:.2e}")
-    print(f"Graus de liberdade: {df_chi2}")
-    print("="*60)
-    
+
     # Fechar o cluster Dask
     client.close()
     cluster.close()

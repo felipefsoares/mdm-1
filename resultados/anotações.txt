@@ -1,0 +1,5 @@
+resultados_qui_quadrado_CPU_OHE
+inicio 2026-05-05 20:58:08,552 
+fim    2026-05-05 20:59:57,504 
+tempo  1 minuto, 48 segundos e 952 milésimos.
+
