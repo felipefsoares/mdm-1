@@ -21,8 +21,8 @@ def print_elapsed(label=""):
 
 # --- PREPARANDO DADOS PARA SELECTKBEST ---
 
-path_parquet = './processados/dados_quiquadrado.parquet'
-df = pd.read_parquet(path_parquet)
+path = './processados_sem_OHE/dados_quiquadrado_reduzido.csv'
+df = pd.read_csv(path)
 print_elapsed("Preparando os dados para SelectKBest com Label Encoding...")
 
 # Criar uma cópia do DataFrame para esta operação para não afetar o 'df' original

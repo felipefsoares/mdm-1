@@ -1,6 +1,7 @@
 
 import gc
 import time
+import glob
 
 import pandas as pd
 import numpy as np
@@ -34,11 +35,21 @@ def remover_acentos(texto):
 pd.set_option('display.max_columns', None)
 print_elapsed("Importações concluídas")
 
-# 2. Carregar o arquivo CSV
-# Devido ao tamanho (1GB), usamos o separador ';' conforme os dados de exemplo
-# e 'low_memory=False' para evitar avisos de tipos mistos.
-path_input = './datasets-nilo/microdados_matriculas_2023.csv'  # Altere para o caminho real do seu arquivo
-df = pd.read_csv(path_input, sep=';', encoding='utf-8', low_memory=False).head(100000)
+# 2. Carregar os arquivos CSV da pasta datasets-nilo
+# pd.read_csv não aceita wildcards; usamos glob para listar os arquivos
+# e pd.concat para combiná-los em um único DataFrame.
+path_pattern = './datasets-nilo/microdados_matriculas_*.csv'
+arquivos = glob.glob(path_pattern)
+
+if not arquivos:
+    raise FileNotFoundError(f"Nenhum arquivo encontrado com o padrão: {path_pattern}")
+
+print(f"Arquivos encontrados ({len(arquivos)}): {arquivos}")
+
+df = pd.concat(
+    [pd.read_csv(f, sep=';', encoding='utf-8', low_memory=False) for f in arquivos],
+    ignore_index=True
+)
 print_elapsed("CSV carregado")
 
 # --- APLICANDO A LIMPEZA ---
@@ -193,6 +204,8 @@ print(f"Arquivo salvo no Drive: {path_output}")
 
 
 print("")
+print_elapsed("Processamento concluído com sucesso")
+print(f"⏱️  Tempo TOTAL de execução: {time.time() - start_time:.2f}s")
 print("============================== FIM ================================================================")
 print("")
 
