@@ -341,9 +341,9 @@ def main():
 
         # Salvar resultado em partições
         # Como estamos processando todos os anos, usamos um nome genérico
-        path_output = f'./processados_LabelEncoding/todos_anos_quiquadrado_*.csv'
-        df.to_csv(path_output, index=False)
-        print_elapsed(f"Arquivos salvos com sucesso em: {path_output}")
+        # path_output = f'./processados_LabelEncoding/todos_anos_quiquadrado_*.csv'
+        # df.to_csv(path_output, index=False)
+        # print_elapsed(f"Arquivos salvos com sucesso em: {path_output}")
 
         print(f"✅ Sucesso! ")
 
@@ -358,14 +358,44 @@ def main():
         print(f"⏱️ Tempo total do processamento: {total_time:.2f} segundos")
         print(f"{'='*70}\n")
 
-        # Exibir mapeamento de Turno se disponível
-        if 'Turno' in encoders_dict:
-            print("\n📊 MAPEAMENTO DE LABEL ENCODING - CAMPO 'TURNO':")
-            print("=" * 60)
-            le_turno = encoders_dict['Turno']
-            for valor_original, valor_codificado in zip(le_turno.classes_, le_turno.transform(le_turno.classes_)):
-                print(f"  '{valor_original}' → {valor_codificado}")
-            print("=" * 60)
+        # --- EXPORTAR MAPEAMENTOS DE LABEL ENCODING ---
+        colunas_para_mapeamento = ['Instituicao', 'Nome de Curso', 'Tipo de Oferta', 'Tipo de Curso', 'Turno']
+        import json
+        
+        mapeamentos_completos = {}
+        
+        print("\n" + "="*70)
+        print("🔍 RESUMO DOS MAPEAMENTOS DE LABEL ENCODING")
+        print("="*70)
+        
+        for col in colunas_para_mapeamento:
+            if col in encoders_dict:
+                le = encoders_dict[col]
+                # Criar dicionário de mapeamento: valor_original -> valor_codificado
+                mapping = {str(val): int(code) for val, code in zip(le.classes_, le.transform(le.classes_))}
+                mapeamentos_completos[col] = mapping
+                
+                print(f"\n📍 Coluna: {col}")
+                # Mostrar apenas os primeiros 15 para não lotar o console (ex: Nome de Curso tem muitos)
+                count = 0
+                for orig, code in mapping.items():
+                    if count < 15:
+                        print(f"  {code}: {orig}")
+                        count += 1
+                    else:
+                        print(f"  ... e mais {len(mapping) - 15} categorias.")
+                        break
+            else:
+                print(f"\n⚠️ Aviso: Coluna '{col}' não encontrada nos encoders.")
+
+        # Salvar mapeamento completo em arquivo JSON
+        output_mapping_path = 'mapeamento_label_encoding.json'
+        with open(output_mapping_path, 'w', encoding='utf-8') as f:
+            json.dump(mapeamentos_completos, f, ensure_ascii=False, indent=4)
+        
+        print("\n" + "="*70)
+        print(f"💾 Mapeamento completo salvo em: {output_mapping_path}")
+        print("="*70 + "\n")
 
     
         del df

@@ -157,8 +157,73 @@ cramer_v_df = cramer_v_df.sort_values(by='Cramers_V', ascending=False)
 print_elapsed("\nResultados do V de Cramer (Maiores valores indicam maior associação):\n")
 print(cramer_v_df)
 
+# --- ANÁLISE DE RESÍDUOS PADRONIZADOS (SIGNIFICÂNCIA LOCAL) ---
+
+# 1. Pegar as top 5 variáveis do V de Cramer
+top_5_features = cramer_v_df.head(5)['Feature'].tolist()
+
+print_elapsed(f"\nCalculando significância local (Resíduos Padronizados Ajustados) para as top 5 variáveis: {top_5_features}")
+
+for feature in top_5_features:
+    print(f"\n{'-'*30}")
+    print(f"📊 Análise de Resíduos: {feature}")
+    print(f"{'-'*30}")
+    
+    # Criar tabela de contingência
+    contingency_table = pd.crosstab(df_le_chi2[feature], df_le_chi2['Alvo_Evadido'])
+    
+    # Calcular chi2, p-valor e frequências esperadas
+    chi2_val, p, dof, expected = chi2_contingency(contingency_table)
+    
+    # Totais para o cálculo dos resíduos ajustados
+    n = contingency_table.values.sum()
+    row_totals = contingency_table.sum(axis=1).values.reshape(-1, 1)
+    col_totals = contingency_table.sum(axis=0).values.reshape(1, -1)
+    
+    # Probabilidades marginais
+    row_probs = row_totals / n
+    col_probs = col_totals / n
+    
+    # Cálculo dos Resíduos Padronizados Ajustados (Z-score)
+    # z = (O - E) / sqrt(E * (1 - row_prob) * (1 - col_prob))
+    with np.errstate(divide='ignore', invalid='ignore'):
+        denominator = np.sqrt(expected * (1 - row_probs) * (1 - col_probs))
+        standardized_residuals = (contingency_table.values - expected) / denominator
+    
+    # Transformar em DataFrame para exibição
+    residuos_df = pd.DataFrame(
+        standardized_residuals,
+        index=contingency_table.index,
+        columns=contingency_table.columns
+    )
+    
+    print(f"P-valor global da variável: {p:.4e}")
+    print(f"Resíduos Padronizados Ajustados (|z| > 1.96 indica significância a 5%):")
+    
+    # Mostrar apenas uma amostra se a tabela for muito grande
+    if len(residuos_df) > 20:
+        print(residuos_df.head(10))
+        print("... (tabela truncada para visualização)")
+    else:
+        print(residuos_df)
+    
+    # Destacar associações mais fortes (top 5 resíduos absolutos)
+    residuos_stack = residuos_df.stack().reset_index()
+    residuos_stack.columns = ['Categoria', 'Alvo', 'Z_Score']
+    residuos_stack['Abs_Z'] = residuos_stack['Z_Score'].abs()
+    sig_residuos = residuos_stack[residuos_stack['Abs_Z'] > 1.96].sort_values(by='Abs_Z', ascending=False)
+    
+    if not sig_residuos.empty:
+        print(f"\nPrincipais associações locais (Top 5):")
+        for _, row in sig_residuos.head(5).iterrows():
+            direcao = "Mais frequente que o esperado (Atração)" if row['Z_Score'] > 0 else "Menos frequente que o esperado (Repulsão)"
+            print(f"  - Categoria {row['Categoria']} ↔ Alvo {row['Alvo']}: z = {row['Z_Score']:.2f} ({direcao})")
+    else:
+        print("\nNenhuma associação local significativa encontrada.")
+
 data_hora = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
 print(f"\n{'='*70}")
 print(f"🕐 Fim do processamento: {data_hora}")
 total_time = time.time() - start_time
 print(f"⏱️ Tempo total do processamento: {total_time:.2f} segundos")
+print(f"{'='*70}\n")
