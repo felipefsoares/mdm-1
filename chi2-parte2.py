@@ -1,4 +1,4 @@
-
+from datetime import datetime
 from sklearn.feature_selection import SelectKBest, chi2
 import pandas as pd
 import scipy.sparse
@@ -6,6 +6,7 @@ from scipy.stats import chi2_contingency
 import numpy as np
 from sklearn.preprocessing import LabelEncoder
 import time
+import glob
 
 # Inicializar cronômetro
 start_time = time.time()
@@ -21,8 +22,30 @@ def print_elapsed(label=""):
 
 # --- PREPARANDO DADOS PARA SELECTKBEST ---
 
-path = './processados_sem_OHE/dados_quiquadrado_reduzido.csv'
-df = pd.read_csv(path)
+path_pattern = './processados_LabelEncoding/todos_anos_quiquadrado_*.csv'
+arquivos = glob.glob(path_pattern)
+
+if not arquivos:
+    raise FileNotFoundError(f"Nenhum arquivo encontrado com o padrão: {path_pattern}")
+
+print(f"Arquivos encontrados ({len(arquivos)}): {arquivos}")
+
+lista_dfs = []
+for f in arquivos:
+    temp_df = pd.read_csv(f, sep=',', encoding='utf-8', low_memory=False)
+    if not temp_df.empty:
+        lista_dfs.append(temp_df)
+    else:
+        print(f"⚠️ Aviso: O arquivo {f} está vazio e será descartado.")
+
+if not lista_dfs:
+    raise ValueError("Nenhum dos arquivos encontrados contém dados.")
+
+df = pd.concat(lista_dfs, ignore_index=True)
+print_elapsed(f"CSV carregado. Total de linhas: {len(df)}")
+
+# path = './processados_sem_OHE/dados_quiquadrado_reduzido.csv'
+# df = pd.read_csv(path)
 print_elapsed("Preparando os dados para SelectKBest com Label Encoding...")
 
 # Criar uma cópia do DataFrame para esta operação para não afetar o 'df' original
@@ -133,3 +156,9 @@ cramer_v_df = cramer_v_df.sort_values(by='Cramers_V', ascending=False)
 
 print_elapsed("\nResultados do V de Cramer (Maiores valores indicam maior associação):\n")
 print(cramer_v_df)
+
+data_hora = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+print(f"\n{'='*70}")
+print(f"🕐 Fim do processamento: {data_hora}")
+total_time = time.time() - start_time
+print(f"⏱️ Tempo total do processamento: {total_time:.2f} segundos")
